@@ -261,6 +261,6 @@ for(j in 1:k.out) {
 }
 
 print( allbestmodels )
-y.out = non_pulsar_data$Mean.of.the.DM.SNR.curve
-CV.out = sum((allpredictedCV.out-y.out)^2)/n.out; CV.out
-R2.out = 1-sum((allpredictedCV.out-y.out)^2)/sum((y.out-mean(y.out))^2); R2.out
+y.out <- non_pulsar_data$Mean.of.the.DM.SNR.curve
+CV.out <- sum((allpredictedCV.out-y.out)^2)/n.out; CV.out
+R2.out <- 1-sum((allpredictedCV.out-y.out)^2)/sum((y.out-mean(y.out))^2); R2.out

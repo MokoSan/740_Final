@@ -1,4 +1,4 @@
-set.seed(123) # For reproducibility
+set.seed(123) # for reproducibility
 
 #######################
 # Loading in the Data #
@@ -131,17 +131,23 @@ ann.sizes <- c(1,2,3)
 ann.sizes.n <- length(ann.sizes)
 
 # SVM Models
-library(e1071)
-
+#library(e1071)
 # Hyperparameters to tune here are:
 # 1. cost:  Cost of constraints violation (default: 1)—it is the 'C'-constant of the regularization term in the Lagrange formulation.
 # 2. gamma: Parameter needed for all kernels except linear (default: 1/(data dimension)).
 # 3. kernel: The kernel used in training and predicting - this will be set to 'radial' because of the observed non-linearities.
-svm.cost <- c(.001, .01, .1, 1, 5, 10, 100)
-svm.gamma <- c(0.5, 1, 2, 3, 4)
-svm.kernel <- 'radial'
+#svm.cost <- c(.001, .01, .1, 1, 5, 10, 100)
+#svm.gamma <- c(0.5, 1, 2, 3, 4)
+#svm.kernel <- 'radial'
 
-nmodels <- ann.sizes.n + 1 # +1 is for the best tuned svm model.
+# Random Forest
+# Hyperparameters to tune here are:
+# 1. mtry: Number of variables randomly sampled as candidates at each split.
+library(randomForest)
+randomForest.mtry <- c(1,2,3)
+randomForest.mtry.n <- length(randomForest.mtry)
+
+nmodels <- ann.sizes.n + randomForest.mtry.n
 
 # Double Cross Validation #
 ###########################
@@ -161,6 +167,7 @@ allbestmodels <- rep(NA,k.out)
 
 # Loop through outer splits.
 for(j in 1:k.out) {
+  print(j)
   groupj.out <- cvgroups.out == j
   
   # Training Data: Outer Layer
@@ -189,17 +196,22 @@ for(j in 1:k.out) {
   groups.in <- c(rep(1:k.in,floor(n.in/k.in))); if(floor(n.in/k.in) != (n.in/k.in)) groups.in = c(groups.in, 1:(n.in%%k.in))
   
   cvgroups.in <- sample(groups.in,n.in) 
-  allmodelCV.in <- rep(NA,nmodels + 1) # place-holder for results
+  allmodelCV.in <- rep(NA,nmodels) # place-holder for results
   
   allpredictedCV.in.ann <- matrix(rep(NA, n.in * ann.sizes.n),
                                   ncol = ann.sizes.n)
+  allpredictedCV.in.rf <- matrix(rep(NA, n.in * randomForest.mtry.n), 
+                                 ncol = randomForest.mtry.n)
+  
   # Cycle through all folds:  fit the model to training data, predict test data,
   # and store the (cross-validated) predicted values
   for (i in 1:k.in)  {
+    print(i) 
     train.in <- (cvgroups.in != i)
     test.in <- (cvgroups.in == i)
     
     # ANN
+    print("Before ANN")
     for (m in 1:ann.sizes.n) {
       ann.in <- nnet(formula = Mean.of.the.DM.SNR.curve ~ .,
                      data = non_pulsar_data,
@@ -209,18 +221,35 @@ for(j in 1:k.out) {
                      size = ann.sizes[m])
       allpredictedCV.in.ann[test.in,m] <- predict(ann.in, fulldata.in[test.in,])
     }
+    
+    print("After ANN")
+    # Random Forest
+    print("Before RF")
+    for(m in 1:randomForest.mtry.n) {
+      randomForest.in <- randomForest(formula = Mean.of.the.DM.SNR.curve ~.,
+                                      data = non_pulsar_data,
+                                      subset = train.in,
+                                      mtry = randomForest.mtry[m]) 
+      allpredictedCV.in.rf[test.in, m] <- predict(randomForest.in, fulldata.in[test.in,])
+    }
   }
+  print("After RF")
   
   for(m in (1 : ann.sizes.n)) {
     allmodelCV.in[m] <- mean((allpredictedCV.in.ann[,m]-fulldata.in$Mean.of.the.DM.SNR.curve)^2)
   }
   
-  svm.tune.out <- tune(svm, 
-                       Mean.of.the.DM.SNR.curve ~ ., 
-                       data = fulldata.in, 
-                       kernel = "radial", 
-                       ranges = list(cost = svm.cost, gamma = svm.gamma ))
-  allmodelCV.in[ann.sizes.n + 1] <- summary(svm.tune.out)$best.performance
+  for(m in 1:randomForest.mtry.n) {
+    allmodelCV.in[ m + ann.sizes.n ] <- 
+      mean((allpredictedCV.in.rf[,m]-fulldata.in$Mean.of.the.DM.SNR.curve)^2)
+  }
+  
+  #svm.tune.out <- tune(svm, 
+  #                     Mean.of.the.DM.SNR.curve ~ ., 
+  #                     data = fulldata.in, 
+  #                     kernel = "radial", 
+  #                     ranges = list(cost = svm.cost, gamma = svm.gamma ))
+  #allmodelCV.in[ann.sizes.n + 1] <- summary(svm.tune.out)$best.performance
   
   # compute and store the CV(10) values
   # visualize CV(10) values across all methods
@@ -241,23 +270,15 @@ for(j in 1:k.out) {
   }
   # Best Model is an SVM Model.
   else {
-    bestcost <- svm.tune.out$best.parameters$cost
-    bestfit <- svm(Mean.of.the.DM.SNR.curve ~ .,
-                   data = fulldata.in,
-                   cost = bestcost,
-                   kernel = 'radial')
+    bestmtry <- randomForest.mtry[bestmodel.in - ann.sizes.n]
+    bestfit <- randomForest(Mean.of.the.DM.SNR.curve ~ .,
+                            data = fulldata.in,
+                            mtry = bestmtry)
   }
   
-  allbestmodels[j] = bestmodel.in
   # Predict using the best model 
-  # Best Model is an ANN Model.
-  if (bestmodel.in <= ann.sizes.n) {
-    allpredictedCV.out[groupj.out] <- predict(bestfit,validdata.out)
-  }
-  # Best Model is an SVM Model.
-  else {
-    allpredictedCV.out[groupj.out] <- predict(bestfit,validdata.out)
-  }
+  allbestmodels[j] = bestmodel.in
+  allpredictedCV.out[groupj.out] <- predict(bestfit,validdata.out)
 }
 
 print( allbestmodels )

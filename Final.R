@@ -130,21 +130,11 @@ library(nnet)
 ann.sizes <- c(1,2,3)
 ann.sizes.n <- length(ann.sizes)
 
-# SVM Models
-#library(e1071)
-# Hyperparameters to tune here are:
-# 1. cost:  Cost of constraints violation (default: 1)—it is the 'C'-constant of the regularization term in the Lagrange formulation.
-# 2. gamma: Parameter needed for all kernels except linear (default: 1/(data dimension)).
-# 3. kernel: The kernel used in training and predicting - this will be set to 'radial' because of the observed non-linearities.
-#svm.cost <- c(.001, .01, .1, 1, 5, 10, 100)
-#svm.gamma <- c(0.5, 1, 2, 3, 4)
-#svm.kernel <- 'radial'
-
 # Random Forest
 # Hyperparameters to tune here are:
 # 1. mtry: Number of variables randomly sampled as candidates at each split.
 library(randomForest)
-randomForest.mtry <- c(1,2,3)
+randomForest.mtry <- c(1,23)
 randomForest.mtry.n <- length(randomForest.mtry)
 
 nmodels <- ann.sizes.n + randomForest.mtry.n
@@ -229,8 +219,9 @@ for(j in 1:k.out) {
       randomForest.in <- randomForest(formula = Mean.of.the.DM.SNR.curve ~.,
                                       data = non_pulsar_data,
                                       subset = train.in,
+                                      ntree = 100,
                                       mtry = randomForest.mtry[m]) 
-      allpredictedCV.in.rf[test.in, m] <- predict(randomForest.in, fulldata.in[test.in,])
+      allpredictedCV.in.rf[test.in, m] <- predict(lm.in, fulldata.in[test.in,])
     }
   }
   print("After RF")
@@ -244,16 +235,9 @@ for(j in 1:k.out) {
       mean((allpredictedCV.in.rf[,m]-fulldata.in$Mean.of.the.DM.SNR.curve)^2)
   }
   
-  #svm.tune.out <- tune(svm, 
-  #                     Mean.of.the.DM.SNR.curve ~ ., 
-  #                     data = fulldata.in, 
-  #                     kernel = "radial", 
-  #                     ranges = list(cost = svm.cost, gamma = svm.gamma ))
-  #allmodelCV.in[ann.sizes.n + 1] <- summary(svm.tune.out)$best.performance
-  
   # compute and store the CV(10) values
   # visualize CV(10) values across all methods
-  plot(allmodelCV.in,pch=20)
+  #plot(allmodelCV.in,pch=20)
   
   # Get the best model.
   bestmodel.in <- (1:nmodels)[order(allmodelCV.in)[1]]  # actual selection
@@ -268,12 +252,14 @@ for(j in 1:k.out) {
                     trace = FALSE,
                     linout = TRUE)
   }
-  # Best Model is an SVM Model.
+  # Best Model is a Random Forest Model.
   else {
     bestmtry <- randomForest.mtry[bestmodel.in - ann.sizes.n]
     bestfit <- randomForest(Mean.of.the.DM.SNR.curve ~ .,
                             data = fulldata.in,
-                            mtry = bestmtry)
+                            mtry = bestmtry,
+                            ntree = 100)
+                  
   }
   
   # Predict using the best model 

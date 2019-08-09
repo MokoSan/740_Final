@@ -74,8 +74,8 @@ non_pulsar.cor <- cor(non_pulsar_data); non_pulsar.cor
 corrplot(non_pulsar.cor, 
          method = "number", 
          number.cex = 0.75, 
-         tl.cex = 0.5,
-         title = "Correlation - Non-Pulsar Stars")
+         tl.cex = 0.5)
+         
 
 # It can be noted that there seems to be a reasonably high negative and positive 
 # correlation between the predictors.
@@ -127,14 +127,15 @@ library(nnet)
 # Hyperparameters to tune here are:
 # 1. size: Number of units in the hidden layer. Can be zero if there are skip-layer units.
 # 2. maxit: Maximum number of iterations. Default 100.
-ann.sizes <- c(1,2,3)
+ann.sizes <- 1:10
 ann.sizes.n <- length(ann.sizes)
 
 # Random Forest
 # Hyperparameters to tune here are:
 # 1. mtry: Number of variables randomly sampled as candidates at each split.
+# 2. ntree: Number of trees to grow. Defaulted at 500.
 library(randomForest)
-randomForest.mtry <- c(1,23)
+randomForest.mtry <- c(1,2,3)
 randomForest.mtry.n <- length(randomForest.mtry)
 
 nmodels <- ann.sizes.n + randomForest.mtry.n
@@ -142,12 +143,12 @@ nmodels <- ann.sizes.n + randomForest.mtry.n
 # Double Cross Validation #
 ###########################
 
-# Outer validation with k = 10
+# Outer loop with k = 10
 fulldata.out <- non_pulsar_data
 k.out <- 10
 n.out <- nrow(non_pulsar_data)
 groups.out <- c(rep(1:k.out,floor(n.out/k.out))); if(floor(n.out/k.out) != (n.out/k.out)) groups.out = c(groups.out, 1:(n.out%%k.out))
-cvgroups.out <- sample(groups.out,n.out)  #orders randomly, with seed (123) 
+cvgroups.out <- sample(groups.out,n.out) 
 
 # Set up storage for predicted values from the double-cross-validation
 allpredictedCV.out <- rep(NA,n.out)
@@ -157,7 +158,6 @@ allbestmodels <- rep(NA,k.out)
 
 # Loop through outer splits.
 for(j in 1:k.out) {
-  print(j)
   groupj.out <- cvgroups.out == j
   
   # Training Data: Outer Layer
@@ -193,15 +193,13 @@ for(j in 1:k.out) {
   allpredictedCV.in.rf <- matrix(rep(NA, n.in * randomForest.mtry.n), 
                                  ncol = randomForest.mtry.n)
   
-  # Cycle through all folds:  fit the model to training data, predict test data,
+  # Cycle through all inner folds:  fit the model to training data, predict test data,
   # and store the (cross-validated) predicted values
   for (i in 1:k.in)  {
-    print(i) 
     train.in <- (cvgroups.in != i)
     test.in <- (cvgroups.in == i)
     
     # ANN
-    print("Before ANN")
     for (m in 1:ann.sizes.n) {
       ann.in <- nnet(formula = Mean.of.the.DM.SNR.curve ~ .,
                      data = non_pulsar_data,
@@ -212,38 +210,34 @@ for(j in 1:k.out) {
       allpredictedCV.in.ann[test.in,m] <- predict(ann.in, fulldata.in[test.in,])
     }
     
-    print("After ANN")
     # Random Forest
-    print("Before RF")
     for(m in 1:randomForest.mtry.n) {
       randomForest.in <- randomForest(formula = Mean.of.the.DM.SNR.curve ~.,
                                       data = non_pulsar_data,
                                       subset = train.in,
-                                      ntree = 100,
                                       mtry = randomForest.mtry[m]) 
       allpredictedCV.in.rf[test.in, m] <- predict(lm.in, fulldata.in[test.in,])
     }
   }
-  print("After RF")
   
+  # Compute the ANN CV
   for(m in (1 : ann.sizes.n)) {
     allmodelCV.in[m] <- mean((allpredictedCV.in.ann[,m]-fulldata.in$Mean.of.the.DM.SNR.curve)^2)
   }
   
+  # Compute the Random Forest CV
   for(m in 1:randomForest.mtry.n) {
     allmodelCV.in[ m + ann.sizes.n ] <- 
       mean((allpredictedCV.in.rf[,m]-fulldata.in$Mean.of.the.DM.SNR.curve)^2)
   }
   
-  # compute and store the CV(10) values
-  # visualize CV(10) values across all methods
-  #plot(allmodelCV.in,pch=20)
-  
   # Get the best model.
   bestmodel.in <- (1:nmodels)[order(allmodelCV.in)[1]]  # actual selection
   
+  plot(allmodelCV.in,pch=20); abline(v=c(randomForest.mtry.n+.5,randomForest.mtry.n+ann.sizes.n+.5))
+  
   # Fit the best model to the available data.
-  # Best Model is an ANN Model.
+  # If the best Model is an ANN Model.
   if (bestmodel.in <= ann.sizes.n) {
     bestsize <- ann.sizes[bestmodel.in]
     bestfit <- nnet(Mean.of.the.DM.SNR.curve ~ ., 
@@ -252,22 +246,61 @@ for(j in 1:k.out) {
                     trace = FALSE,
                     linout = TRUE)
   }
-  # Best Model is a Random Forest Model.
+  
+  # If the best model is a Random Forest Model.
   else {
     bestmtry <- randomForest.mtry[bestmodel.in - ann.sizes.n]
     bestfit <- randomForest(Mean.of.the.DM.SNR.curve ~ .,
                             data = fulldata.in,
-                            mtry = bestmtry,
-                            ntree = 100)
-                  
+                            mtry = bestmtry)
   }
   
   # Predict using the best model 
-  allbestmodels[j] = bestmodel.in
+  allbestmodels[j] <- bestmodel.in
   allpredictedCV.out[groupj.out] <- predict(bestfit,validdata.out)
 }
 
-print( allbestmodels )
+# Get details of best performing models.
+print(allbestmodels)
 y.out <- non_pulsar_data$Mean.of.the.DM.SNR.curve
 CV.out <- sum((allpredictedCV.out-y.out)^2)/n.out; CV.out
 R2.out <- 1-sum((allpredictedCV.out-y.out)^2)/sum((y.out-mean(y.out))^2); R2.out
+
+# Final CV rate based on the double cross-validation with k = 10 is 0.8867948
+# The R^2 is  0.1131507; this seems like a low R^2
+
+#####################################
+# Post-Analysis based on best model #
+#####################################
+
+# We now examine the best performing model i.e. random forest with mtry = 1
+# As a performance improvement, try to get the number of trees that minimize the error rate.
+randomForest.best <- randomForest(formula = Mean.of.the.DM.SNR.curve ~.,
+                                  data = non_pulsar_data,
+                                  mtry = 1,
+                                  importance = TRUE,
+                                  ntree = 1000)
+plot(randomForest.best,
+     main = "Random Forest: Errors vs. Number of Trees")
+# Diminishing returns if we increase the number of trees based on the graph.
+
+# Variable importance
+randomForest.best.importance <- importance(randomForest.best); randomForest.best.importance
+# Seems like all variables are similarly important.
+
+# Conduct single 10 fold cross validation using just the best model.
+k <- 10
+n <- nrow(non_pulsar_data)
+groups <- c(rep(1:k.out,floor(n.out/k.out))); if(floor(n.out/k.out) != (n.out/k.out)) groups.out = c(groups.out, 1:(n.out%%k.out))
+cvgroups <- sample(groups.out,n.out)
+rf.cv <- rep(0, n)
+for( i in 1:k ) {
+  groupi <- cvgroups == i 
+  rf <- randomForest( Mean.of.the.DM.SNR.curve ~., 
+                      data = non_pulsar_data[ !groupi, ], 
+                      mtry = 1)
+  rf.cv[ groupi ] <- predict( rf, newdata = non_pulsar_data[ groupi, ] )
+}
+
+cv.best <- sum(( rf.cv - non_pulsar_data$Mean.of.the.DM.SNR.curve ) ^ 2 ); cv.best
+r2.best <- 1-sum((rf.cv - non_pulsar_data$Mean.of.the.DM.SNR.curve )^2)/sum((non_pulsar_data$Mean.of.the.DM.SNR.curve -mean(non_pulsar_data$Mean.of.the.DM.SNR.curve))^2); r2.best
